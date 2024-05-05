@@ -172,7 +172,7 @@ func getTask() ([]string, string, int, int, int) {
 	ok := call("Coordinator.GetTask", &args, &reply)
 	//time.Sleep(time.Second * 10)
 	if ok {
-		fmt.Printf("Debug---filename:%v, reducefile:%v, taskid:%v, taskName:%v\n", reply.Filenames, reply.ReduceFile, reply.TaskId, reply.TaskName)
+		//fmt.Printf("Debug---filename:%v, reducefile:%v, taskid:%v, taskName:%v\n", reply.Filenames, reply.ReduceFile, reply.TaskId, reply.TaskName)
 	} else {
 		fmt.Printf("Worker Request Failed\n")
 	}

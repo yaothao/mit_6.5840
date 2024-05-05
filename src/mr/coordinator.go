@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -68,7 +67,7 @@ func (c *Coordinator) GetTask(args *GetArgs, reply *GetReply) error {
 			c.mu.Lock()
 			defer c.mu.Unlock()
 			if c.fileManager[filename] > -2 {
-				fmt.Printf("file name %v didn't process\n", filename)
+				//fmt.Printf("file name %v didn't process\n", filename)
 				c.fileManager[filename] = -1
 				// c.retryFile = append(c.retryFile, filename)
 				c.todoFile = append(c.todoFile, filename)
@@ -102,7 +101,7 @@ func (c *Coordinator) GetTask(args *GetArgs, reply *GetReply) error {
 				c.mu.Lock()
 				defer c.mu.Unlock()
 				if c.intermediateFileManager[reduceFile] > -2 {
-					fmt.Printf("Reduce file name %v didn't process\n", reduceFile)
+					//fmt.Printf("Reduce file name %v didn't process\n", reduceFile)
 					c.intermediateFileManager[reduceFile] = -1
 					c.reduceFile = append(c.reduceFile, reduceFile)
 					c.cond.Broadcast()

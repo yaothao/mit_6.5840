@@ -1,12 +1,15 @@
 package kvraft
 
 import (
-	"6.5840/labgob"
-	"6.5840/labrpc"
-	"6.5840/raft"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"6.5840/labgob"
+	"6.5840/labrpc"
+	"6.5840/raft"
 )
 
 const Debug = false
@@ -18,11 +21,11 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	OpCommand OpCommand
+	Key       string
+	Value     string
 }
 
 type KVServer struct {
@@ -35,15 +38,115 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	kvStorage     map[string]string
+	getChan       chan Op
+	putAppendChan chan Op
 }
 
+func (kv *KVServer) checkIsLeader() bool {
+	_, isLeader := kv.rf.GetState()
+	return isLeader
+}
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	// if !kv.checkIsLeader() {
+	// 	reply.Err = ErrWrongLeader
+	// 	return
+	// }
+
+	newOp := Op{OpCommand: GetCommand, Key: args.Key}
+	//fmt.Printf("server %v get 1\n", kv.me)
+	kv.mu.Lock()
+	//fmt.Printf("server %v get 2\n", kv.me)
+	_, _, isLeader := kv.rf.Start(newOp)
+	kv.mu.Unlock()
+	//fmt.Printf("server %v get 3\n", kv.me)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+
+	select {
+	case receivedOp := <-kv.getChan:
+		kv.mu.Lock()
+		if val, ok := kv.kvStorage[receivedOp.Key]; ok {
+			reply.Err = OK
+			reply.Value = val
+		} else {
+			reply.Err = ErrNoKey
+		}
+		kv.mu.Unlock()
+		//fmt.Printf("kvserver : Debug Get -- %v : %v : %v\n", kv.me, receivedOp.Key, kv.kvStorage[receivedOp.Key])
+		return
+	case <-time.After(10 * time.Second):
+		if !kv.checkIsLeader() {
+			reply.Err = ErrWrongLeader
+			return
+		} else {
+			fmt.Printf("%v : Error -- Still waiting for get channel as leader\n", kv.me)
+			reply.Err = ErrWrongLeader
+		}
+	}
+	//fmt.Printf("kvserver : Debug Get* -- %v : %v : %v\n", kv.me, args.Key, kv.kvStorage[args.Key])
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	// if !kv.checkIsLeader() {
+	// 	reply.Err = ErrWrongLeader
+	// 	return
+	// }
+
+	newOp := Op{Key: args.Key, Value: args.Value}
+
+	if args.Op == "Put" {
+		newOp.OpCommand = PutCommand
+	} else {
+		newOp.OpCommand = AppendCommand
+	}
+	//fmt.Printf("server %v 1\n", kv.me)
+	kv.mu.Lock()
+	//fmt.Printf("server %v 2\n", kv.me)
+	_, _, isLeader := kv.rf.Start(newOp)
+	kv.mu.Unlock()
+	//fmt.Printf("server %v 3\n", kv.me)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+	//fmt.Printf("server 4\n")
+	select {
+	case receivedOp := <-kv.putAppendChan:
+		reply.Err = OK
+		kv.mu.Lock()
+		if val, ok := kv.kvStorage[receivedOp.Key]; ok {
+			// Key exists, append the string value to the original value
+			kv.kvStorage[receivedOp.Key] = val + "" + receivedOp.Value
+		} else {
+			// Key does not exist, create a new key-value pair
+			kv.kvStorage[receivedOp.Key] = receivedOp.Value
+		}
+		kv.mu.Unlock()
+		//fmt.Printf("kvserver : Debug PutAppend -- %v : %v : %v\n", kv.me, receivedOp.Key, kv.kvStorage[receivedOp.Key])
+		return
+	case <-time.After(10 * time.Second):
+		fmt.Printf("kvserver %v : Error -- Still waiting for get channel as leader\n", kv.me)
+	}
+}
+
+func (kv *KVServer) applyChanListener() {
+	for !kv.killed() {
+		applyCommand := <-kv.applyCh
+		receivedOp, _ := applyCommand.Command.(Op)
+		if receivedOp.OpCommand == GetCommand {
+			if kv.checkIsLeader() {
+				kv.getChan <- receivedOp
+			}
+		} else {
+			kv.putAppendChan <- receivedOp
+		}
+	}
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -87,11 +190,15 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.maxraftstate = maxraftstate
 
 	// You may need initialization code here.
+	kv.kvStorage = make(map[string]string)
+	kv.getChan = make(chan Op)
+	kv.putAppendChan = make(chan Op)
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
+	go kv.applyChanListener()
 
 	return kv
 }

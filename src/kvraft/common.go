@@ -6,6 +6,14 @@ const (
 	ErrWrongLeader = "ErrWrongLeader"
 )
 
+type OpCommand string
+
+const (
+	GetCommand    OpCommand = "Get"
+	PutCommand    OpCommand = "Put"
+	AppendCommand OpCommand = "Append"
+)
+
 type Err string
 
 // Put or Append
